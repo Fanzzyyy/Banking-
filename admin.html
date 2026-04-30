@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel | GlobalTrust Bank</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-100">
+    <div id="adminLoginContainer" class="min-h-screen flex items-center justify-center">
+        <div class="bg-white p-8 rounded-xl shadow-lg w-96">
+            <h2 class="text-2xl font-bold mb-4">Admin Login</h2>
+            <input type="email" id="adminEmail" placeholder="Admin Email" class="w-full p-2 border rounded mb-3">
+            <input type="password" id="adminPassword" placeholder="Password" class="w-full p-2 border rounded mb-3">
+            <button id="adminLoginBtn" class="w-full bg-blue-900 text-white py-2 rounded">Login</button>
+            <div id="adminError" class="text-red-500 text-sm mt-3"></div>
+        </div>
+    </div>
+
+    <div id="adminPanel" class="hidden">
+        <!-- Navbar -->
+        <nav class="bg-blue-900 text-white p-4 flex justify-between">
+            <span class="text-xl font-bold"><i class="fas fa-shield-alt"></i> Admin Dashboard</span>
+            <button id="adminLogout" class="bg-red-600 px-3 py-1 rounded">Logout</button>
+        </nav>
+
+        <div class="flex">
+            <!-- Sidebar -->
+            <div class="w-64 bg-white shadow min-h-screen p-4">
+                <div class="space-y-2">
+                    <button onclick="showSection('users')" class="w-full text-left p-2 hover:bg-gray-100 rounded">👥 Users & Accounts</button>
+                    <button onclick="showSection('transactions')" class="w-full text-left p-2 hover:bg-gray-100 rounded">📜 All Transactions</button>
+                    <button onclick="showSection('limits')" class="w-full text-left p-2 hover:bg-gray-100 rounded">💰 Transfer Limits</button>
+                </div>
+            </div>
+
+            <!-- Main Content -->
+            <div class="flex-1 p-6">
+                <div id="usersSection">
+                    <h2 class="text-2xl font-bold mb-4">Users and Accounts</h2>
+                    <div id="usersList" class="space-y-4"></div>
+                </div>
+                <div id="transactionsSection" class="hidden">
+                    <h2 class="text-2xl font-bold mb-4">All Transactions</h2>
+                    <div class="overflow-x-auto">
+                        <table class="w-full bg-white rounded shadow">
+                            <thead class="bg-gray-800 text-white"><tr><th class="p-2">Date</th><th>From Account</th><th>To Account</th><th>Amount</th><th>User ID</th></tr></thead>
+                            <tbody id="allTransactionsTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="limitsSection" class="hidden">
+                    <h2 class="text-2xl font-bold mb-4">Set Transfer Limits & Suspensions</h2>
+                    <div id="accountsLimitsList" class="space-y-4"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, collection, getDocs, doc, updateDoc, query, orderBy, addDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getAuth, signInWithEmailWithPasswordLink, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+
+        const firebaseConfig = {
+          apiKey: "AIzaSyCXZ-POCVStZ-c3WUE_XIYsXT0Du94c4Ks",
+          authDomain: "globaltrustbank-4e211.firebaseapp.com",
+          projectId: "globaltrustbank-4e211",
+          storageBucket: "globaltrustbank-4e211.firebasestorage.app",
+          messagingSenderId: "286854321",
+          appId: "1:286854321:web:41cd00e3d6bcc4a92b2690",
+          measurementId: "G-E6JGPTZK02"
+        };
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        let currentAdmin = null;
+
+        // Helper functions
+        async function checkAdmin(uid) {
+            const adminDoc = await getDoc(doc(db, "admins", uid));
+            return adminDoc.exists();
+        }
+
+        async function loadAllUsers() {
+            const usersSnap = await getDocs(collection(db, "users"));
+            const accountsSnap = await getDocs(collection(db, "accounts"));
+            const accountsByUser = {};
+            accountsSnap.forEach(doc => {
+                const data = doc.data();
+                if (!accountsByUser[data.userId]) accountsByUser[data.userId] = [];
+                accountsByUser[data.userId].push({ id: doc.id, ...data });
+            });
+            const container = document.getElementById('usersList');
+            container.innerHTML = "";
+            for (const userDoc of usersSnap.docs) {
+                const user = userDoc.data();
+                const accounts = accountsByUser[userDoc.id] || [];
+                const div = document.createElement('div');
+                div.className = "bg-white p-4 rounded shadow";
+                div.innerHTML = `<div class="font-bold">${user.name} (${user.email})</div>`;
+                accounts.forEach(acc => {
+                    div.innerHTML += `<div class="ml-4 text-sm border-l-2 pl-2 mt-1">${acc.type} - #${acc.accountNumber} - Balance: $${acc.balance} | Daily Limit: $${acc.dailyLimit || 5000}</div>`;
+                });
+                container.appendChild(div);
+            }
+        }
+
+        async function loadAllTransactions() {
+            const txnSnap = await getDocs(query(collection(db, "transactions"), orderBy("date", "desc")));
+            const tbody = document.getElementById('allTransactionsTable');
+            tbody.innerHTML = "";
+            txnSnap.forEach(doc => {
+                const t = doc.data();
+                const row = `<tr class="border-b"><td class="p-2">${new Date(t.date.toDate()).toLocaleString()}</td><td>${t.fromAccountId}</td><td>${t.toAccountId}</td><td>$${t.amount}</td><td class="text-xs">${t.userId.slice(0,8)}</td></tr>`;
+                tbody.innerHTML += row;
+            });
+        }
+
+        async function loadAccountsForLimits() {
+            const accountsSnap = await getDocs(collection(db, "accounts"));
+            const container = document.getElementById('accountsLimitsList');
+            container.innerHTML = "";
+            for (const accDoc of accountsSnap.docs) {
+                const acc = accDoc.data();
+                const userSnap = await getDoc(doc(db, "users", acc.userId));
+                const userName = userSnap.exists() ? userSnap.data().name : "Unknown";
+                const suspendedUntil = acc.suspendedUntil ? new Date(acc.suspendedUntil.toDate()).toISOString().split('T')[0] : "";
+                const div = document.createElement('div');
+                div.className = "bg-white p-4 rounded shadow";
+                div.innerHTML = `
+                    <div><strong>${userName}</strong> - ${acc.type} (${acc.accountNumber})</div>
+                    <div class="grid grid-cols-2 gap-2 mt-2">
+                        <div>Daily Limit: <input type="number" id="limit_${accDoc.id}" value="${acc.dailyLimit || 5000}" class="border rounded w-28 p-1"></div>
+                        <div>Suspended Until: <input type="date" id="suspend_${accDoc.id}" value="${suspendedUntil}" class="border rounded p-1"></div>
+                    </div>
+                    <button onclick="updateAccount('${accDoc.id}')" class="mt-2 bg-blue-600 text-white px-3 py-1 rounded text-sm">Save Changes</button>
+                `;
+                container.appendChild(div);
+            }
+            // Make update function global
+            window.updateAccount = async (accountId) => {
+                const newLimit = parseFloat(document.getElementById(`limit_${accountId}`).value);
+                const suspendDate = document.getElementById(`suspend_${accountId}`).value;
+                const updates = { dailyLimit: newLimit };
+                if (suspendDate) updates.suspendedUntil = new Date(suspendDate);
+                else updates.suspendedUntil = null;
+                await updateDoc(doc(db, "accounts", accountId), updates);
+                alert("Account updated!");
+                loadAccountsForLimits();
+            };
+        }
+
+        function showSection(section) {
+            document.getElementById('usersSection').classList.add('hidden');
+            document.getElementById('transactionsSection').classList.add('hidden');
+            document.getElementById('limitsSection').classList.add('hidden');
+            if (section === 'users') { document.getElementById('usersSection').classList.remove('hidden'); loadAllUsers(); }
+            if (section === 'transactions') { document.getElementById('transactionsSection').classList.remove('hidden'); loadAllTransactions(); }
+            if (section === 'limits') { document.getElementById('limitsSection').classList.remove('hidden'); loadAccountsForLimits(); }
+        }
+
+        // Admin auth
+        document.getElementById('adminLoginBtn').onclick = async () => {
+            const email = document.getElementById('adminEmail').value;
+            const pwd = document.getElementById('adminPassword').value;
+            try {
+                const cred = await signInWithEmailAndPassword(auth, email, pwd);
+                const isAdmin = await checkAdmin(cred.user.uid);
+                if (!isAdmin) throw new Error("Not an admin");
+                currentAdmin = cred.user;
+                document.getElementById('adminLoginContainer').classList.add('hidden');
+                document.getElementById('adminPanel').classList.remove('hidden');
+                showSection('users');
+            } catch(e) {
+                document.getElementById('adminError').innerText = e.message;
+            }
+        };
+        document.getElementById('adminLogout').onclick = () => signOut(auth);
+        onAuthStateChanged(auth, (user) => {
+            if (!user && currentAdmin) {
+                document.getElementById('adminLoginContainer').classList.remove('hidden');
+                document.getElementById('adminPanel').classList.add('hidden');
+                currentAdmin = null;
+            }
+        });
+        window.showSection = showSection;
+    </script>
+</body>
+</html>

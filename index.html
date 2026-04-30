@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GlobalTrust Bank | Customer Portal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100">
+    <!-- Auth Container (Login/Register) -->
+    <div id="authContainer" class="min-h-screen flex items-center justify-center">
+        <div class="bg-white p-8 rounded-xl shadow-lg w-96">
+            <div class="text-center mb-6">
+                <i class="fas fa-university text-5xl text-blue-900"></i>
+                <h2 class="text-2xl font-bold mt-2">GlobalTrust Bank</h2>
+            </div>
+            <div class="mb-4">
+                <button id="showLoginBtn" class="w-1/2 py-2 bg-blue-900 text-white rounded-l">Login</button>
+                <button id="showRegisterBtn" class="w-1/2 py-2 bg-gray-200 rounded-r">Register</button>
+            </div>
+            <!-- Login Form -->
+            <div id="loginForm">
+                <input type="email" id="loginEmail" placeholder="Email" class="w-full p-2 border rounded mb-3">
+                <input type="password" id="loginPassword" placeholder="Password" class="w-full p-2 border rounded mb-3">
+                <button id="doLogin" class="w-full bg-green-600 text-white py-2 rounded">Login</button>
+            </div>
+            <!-- Register Form -->
+            <div id="registerForm" class="hidden">
+                <input type="text" id="regName" placeholder="Full Name" class="w-full p-2 border rounded mb-3">
+                <input type="email" id="regEmail" placeholder="Email" class="w-full p-2 border rounded mb-3">
+                <input type="password" id="regPassword" placeholder="Password" class="w-full p-2 border rounded mb-3">
+                <button id="doRegister" class="w-full bg-blue-900 text-white py-2 rounded">Create Account</button>
+            </div>
+            <div id="authError" class="text-red-500 text-sm mt-3 text-center"></div>
+        </div>
+    </div>
+
+    <!-- Main App (hidden until login) -->
+    <div id="appContainer" class="hidden">
+        <!-- Navbar -->
+        <nav class="bg-blue-900 text-white shadow-lg p-4">
+            <div class="container mx-auto flex justify-between items-center">
+                <div class="flex items-center space-x-2">
+                    <i class="fas fa-university text-2xl"></i>
+                    <span class="text-xl font-bold">GlobalTrust Bank</span>
+                </div>
+                <div>
+                    <span id="userNameDisplay" class="mr-4"></span>
+                    <button id="logoutBtn" class="bg-red-600 px-4 py-1 rounded">Logout</button>
+                </div>
+            </div>
+        </nav>
+
+        <div class="container mx-auto p-6">
+            <!-- Accounts Section -->
+            <div class="grid md:grid-cols-2 gap-6 mb-8">
+                <div id="checkingCard" class="bg-white rounded-xl shadow p-6">
+                    <h3 class="text-xl font-bold">Checking Account</h3>
+                    <p class="text-3xl font-bold text-blue-900 mt-2" id="checkingBalance">$0.00</p>
+                    <p class="text-gray-500 text-sm">Account #<span id="checkingNumber"></span></p>
+                </div>
+                <div id="savingsCard" class="bg-white rounded-xl shadow p-6">
+                    <h3 class="text-xl font-bold">Savings Account</h3>
+                    <p class="text-3xl font-bold text-blue-900 mt-2" id="savingsBalance">$0.00</p>
+                    <p class="text-gray-500 text-sm">Account #<span id="savingsNumber"></span></p>
+                </div>
+            </div>
+
+            <!-- Transfer Section -->
+            <div class="bg-white rounded-xl shadow p-6 mb-8">
+                <h2 class="text-2xl font-bold mb-4">Transfer Money</h2>
+                <div class="grid md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block font-semibold">From Account</label>
+                        <select id="fromAccount" class="w-full p-2 border rounded">
+                            <option value="checking">Checking</option>
+                            <option value="savings">Savings</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-semibold">To Account Number</label>
+                        <input type="text" id="toAccountNumber" placeholder="Enter account number" class="w-full p-2 border rounded">
+                    </div>
+                    <div>
+                        <label class="block font-semibold">Amount ($)</label>
+                        <input type="number" id="transferAmount" placeholder="0.00" class="w-full p-2 border rounded">
+                    </div>
+                    <div>
+                        <label class="block font-semibold">Description</label>
+                        <input type="text" id="transferDesc" placeholder="Optional" class="w-full p-2 border rounded">
+                    </div>
+                </div>
+                <button id="transferBtn" class="mt-4 bg-blue-900 text-white px-6 py-2 rounded hover:bg-blue-800">Send Transfer</button>
+                <div id="transferMessage" class="mt-3 text-sm"></div>
+                <div id="limitWarning" class="mt-2 text-orange-600 text-sm"></div>
+            </div>
+
+            <!-- Transactions Table -->
+            <div class="bg-white rounded-xl shadow overflow-hidden">
+                <h2 class="text-xl font-bold p-4 border-b">Recent Transactions</h2>
+                <table class="w-full">
+                    <thead class="bg-gray-800 text-white">
+                        <tr><th class="p-3">Date</th><th>Description</th><th>Amount</th><th>Status</th></tr>
+                    </thead>
+                    <tbody id="transactionsTable"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, getDocs, query, where, orderBy, runTransaction, writeBatch } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+
+        // REPLACE WITH YOUR FIREBASE CONFIG
+        const firebaseConfig = {
+          apiKey: "AIzaSyCXZ-POCVStZ-c3WUE_XIYsXT0Du94c4Ks",
+          authDomain: "globaltrustbank-4e211.firebaseapp.com",
+          projectId: "globaltrustbank-4e211",
+          storageBucket: "globaltrustbank-4e211.firebasestorage.app",
+          messagingSenderId: "286854321",
+          appId: "1:286854321:web:41cd00e3d6bcc4a92b2690",
+          measurementId: "G-E6JGPTZK02"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        // DOM elements
+        const authContainer = document.getElementById('authContainer');
+        const appContainer = document.getElementById('appContainer');
+        const loginForm = document.getElementById('loginForm');
+        const registerForm = document.getElementById('registerForm');
+        const authError = document.getElementById('authError');
+
+        let currentUser = null;
+        let userAccounts = { checking: null, savings: null };
+
+        // Helper: get today's date as YYYY-MM-DD
+        function getTodayStr() { return new Date().toISOString().split('T')[0]; }
+
+        // Check transfer limit for an account
+        async function checkTransferLimit(accountId, amount) {
+            const accountRef = doc(db, "accounts", accountId);
+            const accountSnap = await getDoc(accountRef);
+            if (!accountSnap.exists()) throw new Error("Account not found");
+            const data = accountSnap.data();
+            // Check if suspended
+            if (data.suspendedUntil && data.suspendedUntil.toDate() > new Date()) {
+                const untilDate = data.suspendedUntil.toDate().toLocaleDateString();
+                throw new Error(`Transfers suspended until ${untilDate}. Please contact support.`);
+            }
+            // Daily limit check
+            const dailyLimit = data.dailyLimit || 5000; // default $5000
+            const today = getTodayStr();
+            let usedToday = data.usedToday || 0;
+            // Reset if lastResetDate is not today
+            if (data.lastResetDate !== today) {
+                usedToday = 0;
+                await updateDoc(accountRef, { usedToday: 0, lastResetDate: today });
+            }
+            if (usedToday + amount > dailyLimit) {
+                throw new Error(`Daily transfer limit of $${dailyLimit} exceeded. You have used $${usedToday} today.`);
+            }
+            return { accountRef, usedToday, dailyLimit };
+        }
+
+        // Update usedToday after successful transfer
+        async function updateUsedToday(accountId, amount) {
+            const accountRef = doc(db, "accounts", accountId);
+            const snap = await getDoc(accountRef);
+            const today = getTodayStr();
+            let usedToday = snap.data().usedToday || 0;
+            if (snap.data().lastResetDate !== today) usedToday = 0;
+            await updateDoc(accountRef, { usedToday: usedToday + amount, lastResetDate: today });
+        }
+
+        // Transfer function
+        async function transfer(fromType, toAccountNumber, amount, description) {
+            if (!currentUser) throw new Error("Not logged in");
+            amount = parseFloat(amount);
+            if (isNaN(amount) || amount <= 0) throw new Error("Invalid amount");
+            
+            const fromAccount = userAccounts[fromType];
+            if (!fromAccount) throw new Error("Source account not found");
+            if (fromAccount.balance < amount) throw new Error("Insufficient funds");
+
+            // Find destination account by account number
+            const accountsRef = collection(db, "accounts");
+            const q = query(accountsRef, where("accountNumber", "==", toAccountNumber));
+            const querySnap = await getDocs(q);
+            if (querySnap.empty) throw new Error("Destination account number not found");
+            const toAccountDoc = querySnap.docs[0];
+            const toAccount = { id: toAccountDoc.id, ...toAccountDoc.data() };
+
+            // Check limit for source account
+            const { accountRef: fromRef, usedToday } = await checkTransferLimit(fromAccount.id, amount);
+            
+            // Perform Firestore transaction
+            await runTransaction(db, async (transaction) => {
+                const fromSnap = await transaction.get(fromRef);
+                const toSnap = await transaction.get(toAccountDoc.ref);
+                if (!fromSnap.exists() || !toSnap.exists()) throw new Error("Account missing");
+                const newFromBalance = fromSnap.data().balance - amount;
+                const newToBalance = toSnap.data().balance + amount;
+                if (newFromBalance < 0) throw new Error("Insufficient funds");
+                transaction.update(fromRef, { balance: newFromBalance });
+                transaction.update(toAccountDoc.ref, { balance: newToBalance });
+                // Create transaction record
+                const txnRef = doc(collection(db, "transactions"));
+                transaction.set(txnRef, {
+                    userId: currentUser.uid,
+                    fromAccountId: fromAccount.id,
+                    toAccountId: toAccount.id,
+                    amount: amount,
+                    description: description || "",
+                    date: new Date(),
+                    type: "transfer",
+                    status: "completed"
+                });
+            });
+            // Update usedToday after transaction (outside transaction to avoid conflict)
+            await updateUsedToday(fromAccount.id, amount);
+            // Refresh UI
+            await loadUserAccounts();
+            await loadTransactions();
+            return { success: true, message: `Transferred $${amount} to account ${toAccountNumber}` };
+        }
+
+        // Load user's accounts
+        async function loadUserAccounts() {
+            const q = query(collection(db, "accounts"), where("userId", "==", currentUser.uid));
+            const snap = await getDocs(q);
+            userAccounts = { checking: null, savings: null };
+            snap.forEach(doc => {
+                const data = doc.data();
+                data.id = doc.id;
+                if (data.type === "checking") userAccounts.checking = data;
+                else if (data.type === "savings") userAccounts.savings = data;
+            });
+            if (userAccounts.checking) {
+                document.getElementById('checkingBalance').innerText = `$${userAccounts.checking.balance.toFixed(2)}`;
+                document.getElementById('checkingNumber').innerText = userAccounts.checking.accountNumber;
+            }
+            if (userAccounts.savings) {
+                document.getElementById('savingsBalance').innerText = `$${userAccounts.savings.balance.toFixed(2)}`;
+                document.getElementById('savingsNumber').innerText = userAccounts.savings.accountNumber;
+            }
+            // Show limit info
+            const fromAcct = userAccounts[document.getElementById('fromAccount').value];
+            if (fromAcct) {
+                const limit = fromAcct.dailyLimit || 5000;
+                const used = fromAcct.usedToday || 0;
+                const suspended = fromAcct.suspendedUntil ? new Date(fromAcct.suspendedUntil.toDate()) : null;
+                let warn = `Daily limit: $${limit} | Used today: $${used}`;
+                if (suspended && suspended > new Date()) warn += ` | Suspended until ${suspended.toLocaleDateString()}`;
+                document.getElementById('limitWarning').innerText = warn;
+            }
+        }
+
+        async function loadTransactions() {
+            const q = query(collection(db, "transactions"), where("userId", "==", currentUser.uid), orderBy("date", "desc"));
+            const snap = await getDocs(q);
+            const tbody = document.getElementById('transactionsTable');
+            tbody.innerHTML = "";
+            snap.forEach(doc => {
+                const t = doc.data();
+                const row = `<tr class="border-b"><td class="p-3">${new Date(t.date.toDate()).toLocaleDateString()}</td><td>${t.description || 'Transfer'}</td><td class="${t.amount < 0 ? 'text-red-600' : 'text-green-600'} font-bold">$${t.amount.toFixed(2)}</td><td><span class="px-2 py-1 rounded-full text-xs bg-green-100 text-green-700">${t.status}</span></td></tr>`;
+                tbody.innerHTML += row;
+            });
+        }
+
+        // UI event handlers
+        document.getElementById('showLoginBtn').onclick = () => { loginForm.classList.remove('hidden'); registerForm.classList.add('hidden'); };
+        document.getElementById('showRegisterBtn').onclick = () => { registerForm.classList.remove('hidden'); loginForm.classList.add('hidden'); };
+        document.getElementById('doLogin').onclick = async () => {
+            const email = document.getElementById('loginEmail').value;
+            const pwd = document.getElementById('loginPassword').value;
+            try {
+                await signInWithEmailAndPassword(auth, email, pwd);
+            } catch(e) { authError.innerText = e.message; }
+        };
+        document.getElementById('doRegister').onclick = async () => {
+            const name = document.getElementById('regName').value;
+            const email = document.getElementById('regEmail').value;
+            const pwd = document.getElementById('regPassword').value;
+            try {
+                const cred = await createUserWithEmailAndPassword(auth, email, pwd);
+                // Create user doc
+                await setDoc(doc(db, "users", cred.user.uid), { name, email, createdAt: new Date() });
+                // Create two bank accounts (checking & savings)
+                const acct1 = await addDoc(collection(db, "accounts"), {
+                    userId: cred.user.uid, type: "checking", accountNumber: Math.floor(Math.random()*1000000000).toString(), balance: 1000, dailyLimit: 5000, usedToday: 0, lastResetDate: getTodayStr(), suspendedUntil: null
+                });
+                const acct2 = await addDoc(collection(db, "accounts"), {
+                    userId: cred.user.uid, type: "savings", accountNumber: Math.floor(Math.random()*1000000000).toString(), balance: 5000, dailyLimit: 5000, usedToday: 0, lastResetDate: getTodayStr(), suspendedUntil: null
+                });
+                alert("Account created! You have $1000 in checking, $5000 in savings.");
+            } catch(e) { authError.innerText = e.message; }
+        };
+        document.getElementById('logoutBtn').onclick = () => signOut(auth);
+        document.getElementById('fromAccount').addEventListener('change', () => loadUserAccounts());
+        document.getElementById('transferBtn').onclick = async () => {
+            const from = document.getElementById('fromAccount').value;
+            const toNum = document.getElementById('toAccountNumber').value;
+            const amount = document.getElementById('transferAmount').value;
+            const desc = document.getElementById('transferDesc').value;
+            const msgDiv = document.getElementById('transferMessage');
+            try {
+                const result = await transfer(from, toNum, amount, desc);
+                msgDiv.className = "text-green-600 mt-3";
+                msgDiv.innerText = result.message;
+                document.getElementById('transferAmount').value = '';
+                document.getElementById('transferDesc').value = '';
+            } catch(e) {
+                msgDiv.className = "text-red-600 mt-3";
+                msgDiv.innerText = e.message;
+            }
+        };
+
+        // Auth state listener
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                currentUser = user;
+                const userDoc = await getDoc(doc(db, "users", user.uid));
+                if (userDoc.exists()) {
+                    document.getElementById('userNameDisplay').innerText = userDoc.data().name;
+                } else {
+                    document.getElementById('userNameDisplay').innerText = user.email;
+                }
+                await loadUserAccounts();
+                await loadTransactions();
+                authContainer.classList.add('hidden');
+                appContainer.classList.remove('hidden');
+            } else {
+                currentUser = null;
+                authContainer.classList.remove('hidden');
+                appContainer.classList.add('hidden');
+                loginForm.classList.remove('hidden');
+                registerForm.classList.add('hidden');
+                document.getElementById('loginEmail').value = '';
+                document.getElementById('loginPassword').value = '';
+                authError.innerText = '';
+            }
+        });
+    </script>
+</body>
+</html>
