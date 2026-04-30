@@ -23,16 +23,17 @@
             <div id="loginForm">
                 <input type="email" id="loginEmail" placeholder="Email" class="w-full p-2 border rounded mb-3">
                 <input type="password" id="loginPassword" placeholder="Password" class="w-full p-2 border rounded mb-3">
-                <button id="doLogin" class="w-full bg-green-600 text-white py-2 rounded">Login</button>
+                <button id="doLogin" class="w-full bg-green-600 text-white py-2 rounded hover:bg-green-700 transition">Login</button>
             </div>
             <!-- Register Form -->
             <div id="registerForm" class="hidden">
                 <input type="text" id="regName" placeholder="Full Name" class="w-full p-2 border rounded mb-3">
                 <input type="email" id="regEmail" placeholder="Email" class="w-full p-2 border rounded mb-3">
                 <input type="password" id="regPassword" placeholder="Password" class="w-full p-2 border rounded mb-3">
-                <button id="doRegister" class="w-full bg-blue-900 text-white py-2 rounded">Create Account</button>
+                <button id="doRegister" class="w-full bg-blue-900 text-white py-2 rounded hover:bg-blue-800 transition">Create Account</button>
             </div>
             <div id="authError" class="text-red-500 text-sm mt-3 text-center"></div>
+            <div id="authSuccess" class="text-green-500 text-sm mt-3 text-center"></div>
         </div>
     </div>
 
@@ -47,14 +48,20 @@
                 </div>
                 <div>
                     <span id="userNameDisplay" class="mr-4"></span>
-                    <button id="logoutBtn" class="bg-red-600 px-4 py-1 rounded">Logout</button>
+                    <button id="logoutBtn" class="bg-red-600 px-4 py-1 rounded hover:bg-red-700 transition">Logout</button>
                 </div>
             </div>
         </nav>
 
         <div class="container mx-auto p-6">
+            <!-- Loading indicator -->
+            <div id="loadingIndicator" class="text-center py-8 hidden">
+                <i class="fas fa-spinner fa-spin text-3xl text-blue-900"></i>
+                <p class="mt-2">Loading your accounts...</p>
+            </div>
+
             <!-- Accounts Section -->
-            <div class="grid md:grid-cols-2 gap-6 mb-8">
+            <div id="accountsSection" class="grid md:grid-cols-2 gap-6 mb-8">
                 <div id="checkingCard" class="bg-white rounded-xl shadow p-6">
                     <h3 class="text-xl font-bold">Checking Account</h3>
                     <p class="text-3xl font-bold text-blue-900 mt-2" id="checkingBalance">$0.00</p>
@@ -91,7 +98,7 @@
                         <input type="text" id="transferDesc" placeholder="Optional" class="w-full p-2 border rounded">
                     </div>
                 </div>
-                <button id="transferBtn" class="mt-4 bg-blue-900 text-white px-6 py-2 rounded hover:bg-blue-800">Send Transfer</button>
+                <button id="transferBtn" class="mt-4 bg-blue-900 text-white px-6 py-2 rounded hover:bg-blue-800 transition">Send Transfer</button>
                 <div id="transferMessage" class="mt-3 text-sm"></div>
                 <div id="limitWarning" class="mt-2 text-orange-600 text-sm"></div>
             </div>
@@ -99,20 +106,23 @@
             <!-- Transactions Table -->
             <div class="bg-white rounded-xl shadow overflow-hidden">
                 <h2 class="text-xl font-bold p-4 border-b">Recent Transactions</h2>
-                <table class="w-full">
-                    <thead class="bg-gray-800 text-white">
-                        <tr><th class="p-3">Date</th><th>Description</th><th>Amount</th><th>Status</th></tr>
-                    </thead>
-                    <tbody id="transactionsTable"></tbody>
-                </table>
+                <div class="overflow-x-auto">
+                    <table class="w-full">
+                        <thead class="bg-gray-800 text-white">
+                            <tr><th class="p-3">Date</th><th>Description</th><th>Amount</th><th>Status</th></tr>
+                        </thead>
+                        <tbody id="transactionsTable"></tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
 
     <!-- Firebase SDK -->
     <script type="module">
+        // Import Firebase modules
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, getDocs, query, where, orderBy, runTransaction, writeBatch } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, getDocs, query, where, orderBy, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
         // REPLACE WITH YOUR FIREBASE CONFIG
@@ -126,6 +136,7 @@
           measurementId: "G-E6JGPTZK02"
         };
 
+        // Initialize Firebase
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
@@ -136,47 +147,71 @@
         const loginForm = document.getElementById('loginForm');
         const registerForm = document.getElementById('registerForm');
         const authError = document.getElementById('authError');
+        const authSuccess = document.getElementById('authSuccess');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const accountsSection = document.getElementById('accountsSection');
 
         let currentUser = null;
         let userAccounts = { checking: null, savings: null };
 
-        // Helper: get today's date as YYYY-MM-DD
-        function getTodayStr() { return new Date().toISOString().split('T')[0]; }
+        // Helper functions
+        function getTodayStr() { 
+            return new Date().toISOString().split('T')[0]; 
+        }
 
-        // Check transfer limit for an account
+        function showLoading(show) {
+            if (show) {
+                loadingIndicator.classList.remove('hidden');
+                accountsSection.classList.add('opacity-50');
+            } else {
+                loadingIndicator.classList.add('hidden');
+                accountsSection.classList.remove('opacity-50');
+            }
+        }
+
+        // Check transfer limit
         async function checkTransferLimit(accountId, amount) {
             const accountRef = doc(db, "accounts", accountId);
             const accountSnap = await getDoc(accountRef);
             if (!accountSnap.exists()) throw new Error("Account not found");
             const data = accountSnap.data();
-            // Check if suspended
-            if (data.suspendedUntil && data.suspendedUntil.toDate() > new Date()) {
-                const untilDate = data.suspendedUntil.toDate().toLocaleDateString();
-                throw new Error(`Transfers suspended until ${untilDate}. Please contact support.`);
+            
+            // Check suspension
+            if (data.suspendedUntil && data.suspendedUntil.toDate) {
+                const suspendDate = data.suspendedUntil.toDate();
+                if (suspendDate > new Date()) {
+                    throw new Error(`Transfers suspended until ${suspendDate.toLocaleDateString()}. Please contact support.`);
+                }
             }
+            
             // Daily limit check
-            const dailyLimit = data.dailyLimit || 5000; // default $5000
+            const dailyLimit = data.dailyLimit || 5000;
             const today = getTodayStr();
             let usedToday = data.usedToday || 0;
-            // Reset if lastResetDate is not today
+            
             if (data.lastResetDate !== today) {
                 usedToday = 0;
                 await updateDoc(accountRef, { usedToday: 0, lastResetDate: today });
             }
+            
             if (usedToday + amount > dailyLimit) {
                 throw new Error(`Daily transfer limit of $${dailyLimit} exceeded. You have used $${usedToday} today.`);
             }
+            
             return { accountRef, usedToday, dailyLimit };
         }
 
-        // Update usedToday after successful transfer
+        // Update daily usage
         async function updateUsedToday(accountId, amount) {
             const accountRef = doc(db, "accounts", accountId);
             const snap = await getDoc(accountRef);
             const today = getTodayStr();
             let usedToday = snap.data().usedToday || 0;
             if (snap.data().lastResetDate !== today) usedToday = 0;
-            await updateDoc(accountRef, { usedToday: usedToday + amount, lastResetDate: today });
+            await updateDoc(accountRef, { 
+                usedToday: usedToday + amount, 
+                lastResetDate: today 
+            });
         }
 
         // Transfer function
@@ -184,32 +219,39 @@
             if (!currentUser) throw new Error("Not logged in");
             amount = parseFloat(amount);
             if (isNaN(amount) || amount <= 0) throw new Error("Invalid amount");
+            if (amount < 0.01) throw new Error("Minimum transfer amount is $0.01");
             
             const fromAccount = userAccounts[fromType];
             if (!fromAccount) throw new Error("Source account not found");
             if (fromAccount.balance < amount) throw new Error("Insufficient funds");
-
-            // Find destination account by account number
+            
+            // Find destination account
             const accountsRef = collection(db, "accounts");
             const q = query(accountsRef, where("accountNumber", "==", toAccountNumber));
             const querySnap = await getDocs(q);
             if (querySnap.empty) throw new Error("Destination account number not found");
             const toAccountDoc = querySnap.docs[0];
             const toAccount = { id: toAccountDoc.id, ...toAccountDoc.data() };
-
-            // Check limit for source account
-            const { accountRef: fromRef, usedToday } = await checkTransferLimit(fromAccount.id, amount);
             
-            // Perform Firestore transaction
+            // Prevent self-transfer
+            if (fromAccount.id === toAccount.id) throw new Error("Cannot transfer to same account");
+            
+            // Check limit
+            const { accountRef: fromRef } = await checkTransferLimit(fromAccount.id, amount);
+            
+            // Perform transaction
             await runTransaction(db, async (transaction) => {
                 const fromSnap = await transaction.get(fromRef);
                 const toSnap = await transaction.get(toAccountDoc.ref);
                 if (!fromSnap.exists() || !toSnap.exists()) throw new Error("Account missing");
+                
                 const newFromBalance = fromSnap.data().balance - amount;
                 const newToBalance = toSnap.data().balance + amount;
                 if (newFromBalance < 0) throw new Error("Insufficient funds");
+                
                 transaction.update(fromRef, { balance: newFromBalance });
                 transaction.update(toAccountDoc.ref, { balance: newToBalance });
+                
                 // Create transaction record
                 const txnRef = doc(collection(db, "transactions"));
                 transaction.set(txnRef, {
@@ -217,79 +259,140 @@
                     fromAccountId: fromAccount.id,
                     toAccountId: toAccount.id,
                     amount: amount,
-                    description: description || "",
+                    description: description || "Transfer",
                     date: new Date(),
                     type: "transfer",
                     status: "completed"
                 });
             });
-            // Update usedToday after transaction (outside transaction to avoid conflict)
+            
+            // Update daily limit usage
             await updateUsedToday(fromAccount.id, amount);
-            // Refresh UI
-            await loadUserAccounts();
-            await loadTransactions();
-            return { success: true, message: `Transferred $${amount} to account ${toAccountNumber}` };
+            
+            return { success: true, message: `Successfully transferred $${amount.toFixed(2)} to account ${toAccountNumber}` };
         }
 
-        // Load user's accounts
+        // Load user accounts
         async function loadUserAccounts() {
-            const q = query(collection(db, "accounts"), where("userId", "==", currentUser.uid));
-            const snap = await getDocs(q);
-            userAccounts = { checking: null, savings: null };
-            snap.forEach(doc => {
-                const data = doc.data();
-                data.id = doc.id;
-                if (data.type === "checking") userAccounts.checking = data;
-                else if (data.type === "savings") userAccounts.savings = data;
-            });
-            if (userAccounts.checking) {
-                document.getElementById('checkingBalance').innerText = `$${userAccounts.checking.balance.toFixed(2)}`;
-                document.getElementById('checkingNumber').innerText = userAccounts.checking.accountNumber;
-            }
-            if (userAccounts.savings) {
-                document.getElementById('savingsBalance').innerText = `$${userAccounts.savings.balance.toFixed(2)}`;
-                document.getElementById('savingsNumber').innerText = userAccounts.savings.accountNumber;
-            }
-            // Show limit info
-            const fromAcct = userAccounts[document.getElementById('fromAccount').value];
-            if (fromAcct) {
-                const limit = fromAcct.dailyLimit || 5000;
-                const used = fromAcct.usedToday || 0;
-                const suspended = fromAcct.suspendedUntil ? new Date(fromAcct.suspendedUntil.toDate()) : null;
-                let warn = `Daily limit: $${limit} | Used today: $${used}`;
-                if (suspended && suspended > new Date()) warn += ` | Suspended until ${suspended.toLocaleDateString()}`;
-                document.getElementById('limitWarning').innerText = warn;
+            try {
+                showLoading(true);
+                const q = query(collection(db, "accounts"), where("userId", "==", currentUser.uid));
+                const snap = await getDocs(q);
+                userAccounts = { checking: null, savings: null };
+                
+                snap.forEach(doc => {
+                    const data = doc.data();
+                    data.id = doc.id;
+                    if (data.type === "checking") userAccounts.checking = data;
+                    else if (data.type === "savings") userAccounts.savings = data;
+                });
+                
+                if (userAccounts.checking) {
+                    document.getElementById('checkingBalance').innerText = `$${userAccounts.checking.balance.toFixed(2)}`;
+                    document.getElementById('checkingNumber').innerText = userAccounts.checking.accountNumber;
+                }
+                if (userAccounts.savings) {
+                    document.getElementById('savingsBalance').innerText = `$${userAccounts.savings.balance.toFixed(2)}`;
+                    document.getElementById('savingsNumber').innerText = userAccounts.savings.accountNumber;
+                }
+                
+                // Update limit warning
+                const fromAcct = userAccounts[document.getElementById('fromAccount').value];
+                if (fromAcct) {
+                    const limit = fromAcct.dailyLimit || 5000;
+                    const used = fromAcct.usedToday || 0;
+                    let warn = `Daily limit: $${limit} | Used today: $${used}`;
+                    if (fromAcct.suspendedUntil && fromAcct.suspendedUntil.toDate) {
+                        const suspendDate = fromAcct.suspendedUntil.toDate();
+                        if (suspendDate > new Date()) {
+                            warn += ` | ⚠️ Suspended until ${suspendDate.toLocaleDateString()}`;
+                        }
+                    }
+                    document.getElementById('limitWarning').innerText = warn;
+                }
+            } catch (error) {
+                console.error("Error loading accounts:", error);
+                authError.innerText = "Error loading accounts: " + error.message;
+            } finally {
+                showLoading(false);
             }
         }
 
+        // Load transactions
         async function loadTransactions() {
-            const q = query(collection(db, "transactions"), where("userId", "==", currentUser.uid), orderBy("date", "desc"));
-            const snap = await getDocs(q);
-            const tbody = document.getElementById('transactionsTable');
-            tbody.innerHTML = "";
-            snap.forEach(doc => {
-                const t = doc.data();
-                const row = `<tr class="border-b"><td class="p-3">${new Date(t.date.toDate()).toLocaleDateString()}</td><td>${t.description || 'Transfer'}</td><td class="${t.amount < 0 ? 'text-red-600' : 'text-green-600'} font-bold">$${t.amount.toFixed(2)}</td><td><span class="px-2 py-1 rounded-full text-xs bg-green-100 text-green-700">${t.status}</span></td></tr>`;
-                tbody.innerHTML += row;
-            });
+            try {
+                const q = query(collection(db, "transactions"), where("userId", "==", currentUser.uid), orderBy("date", "desc"));
+                const snap = await getDocs(q);
+                const tbody = document.getElementById('transactionsTable');
+                tbody.innerHTML = "";
+                
+                if (snap.empty) {
+                    tbody.innerHTML = '<tr><td colspan="4" class="text-center p-4 text-gray-500">No transactions yet</td></tr>';
+                    return;
+                }
+                
+                snap.forEach(doc => {
+                    const t = doc.data();
+                    const date = t.date.toDate ? t.date.toDate() : new Date(t.date);
+                    const row = `
+                        <tr class="border-b hover:bg-gray-50">
+                            <td class="p-3">${date.toLocaleDateString()}</td>
+                            <td class="p-3">${t.description || 'Transfer'}</td>
+                            <td class="p-3 ${t.amount < 0 ? 'text-red-600' : 'text-green-600'} font-bold">
+                                ${t.amount < 0 ? '-' : '+'}$${Math.abs(t.amount).toFixed(2)}
+                            </td>
+                            <td class="p-3">
+                                <span class="px-2 py-1 rounded-full text-xs bg-green-100 text-green-700">${t.status}</span>
+                            </td>
+                        </tr>
+                    `;
+                    tbody.innerHTML += row;
+                });
+            } catch (error) {
+                console.error("Error loading transactions:", error);
+            }
         }
 
-        // UI event handlers
-        document.getElementById('showLoginBtn').onclick = () => { loginForm.classList.remove('hidden'); registerForm.classList.add('hidden'); };
-        document.getElementById('showRegisterBtn').onclick = () => { registerForm.classList.remove('hidden'); loginForm.classList.add('hidden'); };
+        // Event listeners
+        document.getElementById('showLoginBtn').onclick = () => {
+            loginForm.classList.remove('hidden');
+            registerForm.classList.add('hidden');
+            authError.innerText = '';
+            authSuccess.innerText = '';
+        };
+        
+        document.getElementById('showRegisterBtn').onclick = () => {
+            registerForm.classList.remove('hidden');
+            loginForm.classList.add('hidden');
+            authError.innerText = '';
+            authSuccess.innerText = '';
+        };
+        
         document.getElementById('doLogin').onclick = async () => {
             const email = document.getElementById('loginEmail').value;
             const pwd = document.getElementById('loginPassword').value;
-            const errorDiv = document.getElementById('authError');
+            const errorDiv = authError;
+            const successDiv = authSuccess;
+            
+            if (!email || !pwd) {
+                errorDiv.innerText = "Please enter email and password";
+                return;
+            }
+            
             errorDiv.innerText = "Logging in...";
+            successDiv.innerText = "";
+            
             try {
-                console.log("Attempting login with:", email);
                 const userCred = await signInWithEmailAndPassword(auth, email, pwd);
-                console.log("Login success, user UID:", userCred.user.uid);
-        // The onAuthStateChanged listener will handle the UI change
+                console.log("Login successful:", userCred.user.uid);
+                // onAuthStateChanged will handle the rest
             } catch (e) {
                 console.error("Login error:", e);
-                errorDiv.innerText = e.message;
+                let errorMsg = e.message;
+                if (e.code === 'auth/user-not-found') errorMsg = "No account found with this email";
+                if (e.code === 'auth/wrong-password') errorMsg = "Incorrect password";
+                if (e.code === 'auth/invalid-email') errorMsg = "Invalid email format";
+                errorDiv.innerText = errorMsg;
             }
         };
         
@@ -297,66 +400,190 @@
             const name = document.getElementById('regName').value;
             const email = document.getElementById('regEmail').value;
             const pwd = document.getElementById('regPassword').value;
+            const errorDiv = authError;
+            const successDiv = authSuccess;
+            
+            if (!name || !email || !pwd) {
+                errorDiv.innerText = "Please fill all fields";
+                return;
+            }
+            
+            if (pwd.length < 6) {
+                errorDiv.innerText = "Password must be at least 6 characters";
+                return;
+            }
+            
+            errorDiv.innerText = "Creating account...";
+            successDiv.innerText = "";
+            
             try {
-                const cred = await createUserWithEmailAndPassword(auth, email, pwd);
-                // Create user doc
-                await setDoc(doc(db, "users", cred.user.uid), { name, email, createdAt: new Date() });
-                // Create two bank accounts (checking & savings)
-                const acct1 = await addDoc(collection(db, "accounts"), {
-                    userId: cred.user.uid, type: "checking", accountNumber: Math.floor(Math.random()*1000000000).toString(), balance: 1000, dailyLimit: 5000, usedToday: 0, lastResetDate: getTodayStr(), suspendedUntil: null
+                const userCred = await createUserWithEmailAndPassword(auth, email, pwd);
+                console.log("User created:", userCred.user.uid);
+                
+                // Create user document
+                await setDoc(doc(db, "users", userCred.user.uid), { 
+                    name, 
+                    email, 
+                    createdAt: new Date() 
                 });
-                const acct2 = await addDoc(collection(db, "accounts"), {
-                    userId: cred.user.uid, type: "savings", accountNumber: Math.floor(Math.random()*1000000000).toString(), balance: 5000, dailyLimit: 5000, usedToday: 0, lastResetDate: getTodayStr(), suspendedUntil: null
+                
+                // Create checking account
+                const checkingNumber = Math.floor(100000000 + Math.random() * 900000000).toString();
+                const checkingRef = await addDoc(collection(db, "accounts"), {
+                    userId: userCred.user.uid,
+                    type: "checking",
+                    accountNumber: checkingNumber,
+                    balance: 1000,
+                    dailyLimit: 5000,
+                    usedToday: 0,
+                    lastResetDate: getTodayStr(),
+                    suspendedUntil: null
                 });
-                alert("Account created! You have $1000 in checking, $5000 in savings.");
-            } catch(e) { authError.innerText = e.message; }
+                
+                // Create savings account
+                const savingsNumber = Math.floor(100000000 + Math.random() * 900000000).toString();
+                const savingsRef = await addDoc(collection(db, "accounts"), {
+                    userId: userCred.user.uid,
+                    type: "savings",
+                    accountNumber: savingsNumber,
+                    balance: 5000,
+                    dailyLimit: 5000,
+                    usedToday: 0,
+                    lastResetDate: getTodayStr(),
+                    suspendedUntil: null
+                });
+                
+                console.log("Accounts created:", checkingNumber, savingsNumber);
+                successDiv.innerText = "Account created successfully! Please login.";
+                
+                // Clear form
+                document.getElementById('regName').value = '';
+                document.getElementById('regEmail').value = '';
+                document.getElementById('regPassword').value = '';
+                
+                // Switch to login form after 2 seconds
+                setTimeout(() => {
+                    document.getElementById('showLoginBtn').click();
+                }, 2000);
+                
+            } catch (e) {
+                console.error("Registration error:", e);
+                let errorMsg = e.message;
+                if (e.code === 'auth/email-already-in-use') errorMsg = "Email already registered";
+                if (e.code === 'auth/invalid-email') errorMsg = "Invalid email format";
+                errorDiv.innerText = errorMsg;
+            }
         };
-        document.getElementById('logoutBtn').onclick = () => signOut(auth);
-        document.getElementById('fromAccount').addEventListener('change', () => loadUserAccounts());
+        
+        document.getElementById('logoutBtn').onclick = async () => {
+            try {
+                await signOut(auth);
+            } catch (e) {
+                console.error("Logout error:", e);
+            }
+        };
+        
+        document.getElementById('fromAccount').addEventListener('change', () => {
+            if (currentUser) loadUserAccounts();
+        });
+        
         document.getElementById('transferBtn').onclick = async () => {
             const from = document.getElementById('fromAccount').value;
             const toNum = document.getElementById('toAccountNumber').value;
             const amount = document.getElementById('transferAmount').value;
             const desc = document.getElementById('transferDesc').value;
             const msgDiv = document.getElementById('transferMessage');
+            
+            if (!toNum) {
+                msgDiv.className = "text-red-600 mt-3";
+                msgDiv.innerText = "Please enter destination account number";
+                return;
+            }
+            
+            if (!amount || parseFloat(amount) <= 0) {
+                msgDiv.className = "text-red-600 mt-3";
+                msgDiv.innerText = "Please enter a valid amount";
+                return;
+            }
+            
+            msgDiv.innerText = "Processing transfer...";
+            msgDiv.className = "text-blue-600 mt-3";
+            
             try {
-                const result = await transfer(from, toNum, amount, desc);
+                const result = await transfer(from, toNum, parseFloat(amount), desc);
                 msgDiv.className = "text-green-600 mt-3";
                 msgDiv.innerText = result.message;
                 document.getElementById('transferAmount').value = '';
                 document.getElementById('transferDesc').value = '';
-            } catch(e) {
+                document.getElementById('toAccountNumber').value = '';
+                
+                // Refresh data
+                await loadUserAccounts();
+                await loadTransactions();
+                
+                // Clear success message after 5 seconds
+                setTimeout(() => {
+                    if (msgDiv.innerText === result.message) {
+                        msgDiv.innerText = '';
+                    }
+                }, 5000);
+                
+            } catch (e) {
+                console.error("Transfer error:", e);
                 msgDiv.className = "text-red-600 mt-3";
                 msgDiv.innerText = e.message;
             }
         };
-
+        
         // Auth state listener
         onAuthStateChanged(auth, async (user) => {
-          console.log("Auth state changed, user:", user);
+            console.log("Auth state changed:", user ? `Logged in as ${user.uid}` : "Logged out");
+            
             if (user) {
                 currentUser = user;
-                const userDoc = await getDoc(doc(db, "users", user.uid));
-                if (userDoc.exists()) {
-                    document.getElementById('userNameDisplay').innerText = userDoc.data().name;
-                } else {
-                    document.getElementById('userNameDisplay').innerText = user.email;
+                
+                try {
+                    // Get user document
+                    const userDoc = await getDoc(doc(db, "users", user.uid));
+                    if (userDoc.exists()) {
+                        document.getElementById('userNameDisplay').innerHTML = `<i class="fas fa-user"></i> ${userDoc.data().name}`;
+                    } else {
+                        document.getElementById('userNameDisplay').innerHTML = `<i class="fas fa-user"></i> ${user.email}`;
+                    }
+                    
+                    // Load accounts and transactions
+                    await loadUserAccounts();
+                    await loadTransactions();
+                    
+                    // Show app, hide auth
+                    authContainer.classList.add('hidden');
+                    appContainer.classList.remove('hidden');
+                    authError.innerText = '';
+                    
+                } catch (error) {
+                    console.error("Error loading user data:", error);
+                    authError.innerText = "Error loading your data. Please refresh the page.";
+                    // Still try to show app
+                    authContainer.classList.add('hidden');
+                    appContainer.classList.remove('hidden');
                 }
-                await loadUserAccounts();
-                await loadTransactions();
-                authContainer.classList.add('hidden');
-                appContainer.classList.remove('hidden');
             } else {
                 currentUser = null;
                 authContainer.classList.remove('hidden');
                 appContainer.classList.add('hidden');
-                loginForm.classList.remove('hidden');
-                registerForm.classList.add('hidden');
+                
+                // Clear forms
                 document.getElementById('loginEmail').value = '';
                 document.getElementById('loginPassword').value = '';
                 authError.innerText = '';
+                authSuccess.innerText = '';
             }
         });
+        
+        // Initial setup - show login form
+        document.getElementById('showLoginBtn').click();
+        
+        console.log("App initialized. Firebase config loaded.");
     </script>
 </body>
 </html>
