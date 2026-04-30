@@ -280,10 +280,19 @@
         document.getElementById('doLogin').onclick = async () => {
             const email = document.getElementById('loginEmail').value;
             const pwd = document.getElementById('loginPassword').value;
+            const errorDiv = document.getElementById('authError');
+            errorDiv.innerText = "Logging in...";
             try {
-                await signInWithEmailAndPassword(auth, email, pwd);
-            } catch(e) { authError.innerText = e.message; }
+                console.log("Attempting login with:", email);
+                const userCred = await signInWithEmailAndPassword(auth, email, pwd);
+                console.log("Login success, user UID:", userCred.user.uid);
+        // The onAuthStateChanged listener will handle the UI change
+            } catch (e) {
+                console.error("Login error:", e);
+                errorDiv.innerText = e.message;
+            }
         };
+        
         document.getElementById('doRegister').onclick = async () => {
             const name = document.getElementById('regName').value;
             const email = document.getElementById('regEmail').value;
@@ -324,6 +333,7 @@
 
         // Auth state listener
         onAuthStateChanged(auth, async (user) => {
+          console.log("Auth state changed, user:", user);
             if (user) {
                 currentUser = user;
                 const userDoc = await getDoc(doc(db, "users", user.uid));
